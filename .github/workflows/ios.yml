@@ -1,0 +1,73 @@
+name: iOS build and regression
+on:
+  push:
+    branches: [main, ios]
+    paths:
+      - 'ios/**'
+  pull_request:
+    paths:
+      - 'ios/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Run the iOS regression suite
+        working-directory: ios
+        run: |
+          xcodebuild test \
+            -project SUSECampusLogin.xcodeproj \
+            -scheme SUSECampusLogin \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-tests
+          path: ios/build/Logs/Test/*.xcresult
+          if-no-files-found: warn
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+      - name: Build an unsigned app for a physical device
+        working-directory: ios
+        run: |
+          xcodebuild build \
+            -project SUSECampusLogin.xcodeproj \
+            -scheme SUSECampusLogin \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
+      - name: Pack the unsigned IPA
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/SUSECampusLogin.app Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload SUSECampusLogin-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-unsigned-ipa
+          path: ios/SUSECampusLogin-unsigned.ipa
+          if-no-files-found: error
